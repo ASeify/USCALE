@@ -1,0 +1,323 @@
+{
+ "cells": [
+  {
+   "cell_type": "code",
+   "execution_count": 124,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "import os\n",
+    "import networkx as nx\n",
+    "import random\n",
+    "from easygui import *\n",
+    "import math\n",
+    "import time\n",
+    "import sys\n",
+    "from termcolor import colored\n",
+    "import argparse\n",
+    "import pandas as pd\n",
+    "import numpy as np\n",
+    "from texttable import Texttable\n",
+    "from tkinter import Tk, filedialog\n",
+    "import pygsp\n",
+    "from tqdm import tqdm\n",
+    "from pydoc import locate\n",
+    "import concurrent.futures\n",
+    "from datetime import datetime"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 125,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "CLASSES_PATH = os.path.dirname(os.path.abspath('E:/Masters thesis/Code/Classes'))\n",
+    "if not (CLASSES_PATH in sys.path):\n",
+    "    sys.path.append(CLASSES_PATH)\n",
+    "from Classes.Files_Handler_Class import Files_Handler\n",
+    "from Classes.Get_Past_Results_Class import Get_Past_Results\n",
+    "from Classes.Network_Infos_Writer_Class import Network_Infos_Writer\n",
+    "from Classes.spectral_machinery import WaveletMachine"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 126,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "color_list = [\"light_red\", \"light_green\", \"light_yellow\",\n",
+    "               \"light_blue\",\"light_magenta\", \"light_cyan\",\n",
+    "               \"blue\", \"red\", \"white\", \"green\", \"yellow\",\n",
+    "                 \"magenta\", \"cyan\", ]"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 127,
+   "metadata": {},
+   "outputs": [
+    {
+     "data": {
+      "text/plain": [
+       "{'path': 'E:/Masters thesis/Networks Dataset/Monoplex/Public/Social Networks/1k - 10K/',\n",
+       " 'name': 'soc-hamsterster(2426 N and 16630 E)',\n",
+       " 'type': '.edges'}"
+      ]
+     },
+     "execution_count": 127,
+     "metadata": {},
+     "output_type": "execute_result"
+    }
+   ],
+   "source": [
+    "files_handler_obj = Files_Handler()\n",
+    "file_path = files_handler_obj.select_files(\"text files\", \".edgeslist .edgelist .edges .mtx .txt\")\n",
+    "if file_path is None or file_path == '':\n",
+    "    sys.exit(\"File Selection Canceled !\")\n",
+    "file_info = files_handler_obj.get_file_path_info(file_path)\n",
+    "network_name = file_info['name']\n",
+    "network_type = file_info['type']\n",
+    "network_path = file_info['path']\n",
+    "if network_name == \"\":\n",
+    "    sys.exit(\"Dont Network Selection!\")\n",
+    "file_info"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 128,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "\"\"\"Running the GraphWave machine.\"\"\"\n",
+    "def parameter_parser(output_path:os.path):\n",
+    "    \"\"\"\n",
+    "    A method to parse up command line parameters.\n",
+    "    \"\"\"\n",
+    "    parser = argparse.ArgumentParser(description=\"Run GraphWave.\")\n",
+    "\n",
+    "    parser.add_argument(\"--mechanism\",\n",
+    "                        nargs=\"?\",\n",
+    "                        default=\"exact\",\n",
+    "\t                help=\"Eigenvalue calculation method. Default is exact.\")\n",
+    "\n",
+    "    parser.add_argument(\"--output\",\n",
+    "                        nargs=\"?\",\n",
+    "                        default=output_path,\n",
+    "\t                help=\"Path to the structural embedding. Default is embedding.csv.\")\n",
+    "\n",
+    "    parser.add_argument(\"--heat-coefficient\",\n",
+    "                        type=float,\n",
+    "                        default=1000.0,\n",
+    "\t                help=\"Heat kernel exponent. Default is 1000.0.\")\n",
+    "\n",
+    "    parser.add_argument(\"--sample-number\",\n",
+    "                        type=int,\n",
+    "                        default=50,\n",
+    "\t                help=\"Number of characteristic function sample points. Default is 50.\")\n",
+    "\n",
+    "    parser.add_argument(\"--approximation\",\n",
+    "                        type=int,\n",
+    "                        default=100,\n",
+    "\t                help=\"Number of Chebyshev approximation. Default is 100.\")\n",
+    "\n",
+    "    parser.add_argument(\"--step-size\",\n",
+    "                        type=int,\n",
+    "                        default=20,\n",
+    "\t                help=\"Number of steps. Default is 20.\")\n",
+    "\n",
+    "    parser.add_argument(\"--switch\",\n",
+    "                        type=int,\n",
+    "                        default=62,\n",
+    "\t                help=\"Number of dimensions. Default is 100.\")\n",
+    "\n",
+    "    parser.add_argument(\"--node-label-type\",\n",
+    "                        type=str,\n",
+    "                        default=\"int\",\n",
+    "                        help=\"Used for sorting index of output embedding. One of 'int', 'string', or 'float'. Default is 'int'\")\n",
+    "\n",
+    "    parser.add_argument(\"--edgelist-input\",\n",
+    "                        default=True,\n",
+    "                        action='store_true',\n",
+    "                        help=\"Use NetworkX's format for input instead of CSV. Default is False\")\n",
+    "    \n",
+    "\n",
+    "    args = parser.parse_args(args=[])\n",
+    "    return args\n",
+    "\n",
+    "def tab_printer(args):\n",
+    "    \"\"\"\n",
+    "    Function to print the logs in a nice tabular format.\n",
+    "    :param args: Parameters used for the model.\n",
+    "    \"\"\"\n",
+    "    args = vars(args)\n",
+    "    keys = sorted(args.keys())\n",
+    "    tab = Texttable()\n",
+    "    tab.add_rows([[\"Parameter\", \"Value\"]])\n",
+    "    tab.add_rows([[k.replace(\"_\", \" \").capitalize(), args[k]] for k in keys])\n",
+    "    print(tab.draw())\n",
+    "\n",
+    "def read_graph(settings):\n",
+    "    \"\"\"\n",
+    "    Reading the edge list from the path and returning the networkx graph object.\n",
+    "    :param path: Path to the edge list.\n",
+    "    :return graph: Graph from edge list.\n",
+    "    \"\"\"\n",
+    "    if settings.edgelist_input:\n",
+    "        graph = nx.read_edgelist(settings.input)\n",
+    "    else:\n",
+    "        edge_list = pd.read_csv(settings.input).values.tolist()\n",
+    "        graph = nx.from_edgelist(edge_list)\n",
+    "    return graph\n",
+    "\n",
+    "\n"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 129,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "path = files_handler_obj.make_dir(file_info['path'], file_info['name'])\n",
+    "date_now = datetime.now()\n",
+    "current_datetime_str = str(date_now.year) +\" \"+ str(date_now.month) +\" \"+ str(date_now.day)\n",
+    "current_datetime_str += \"_\" + str(date_now.hour) \n",
+    "current_datetime_str = current_datetime_str\n",
+    "out_path = files_handler_obj.make_dir(path, current_datetime_str)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 130,
+   "metadata": {},
+   "outputs": [
+    {
+     "data": {
+      "text/plain": [
+       "Namespace(mechanism='exact', output='E:/Masters thesis/Networks Dataset/Monoplex/Public/Social Networks/1k - 10K/soc-hamsterster(2426 N and 16630 E)/2024 11 6_20/', heat_coefficient=1000.0, sample_number=50, approximation=100, step_size=20, switch=62, node_label_type='int', edgelist_input=True)"
+      ]
+     },
+     "execution_count": 130,
+     "metadata": {},
+     "output_type": "execute_result"
+    }
+   ],
+   "source": [
+    "settings_args = parameter_parser(out_path)\n",
+    "settings_args"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 131,
+   "metadata": {},
+   "outputs": [
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "soc-hamsterster(2426 N and 16630 E) \n",
+      " Graph with 2426 nodes and 16630 edges\n"
+     ]
+    }
+   ],
+   "source": [
+    "if (\n",
+    "    network_type == \".edgeslist\"\n",
+    "    or network_type == \".edgelist\"\n",
+    "    or network_type == \".edges\"\n",
+    "    or network_type == \".txt\"\n",
+    "    or network_type == \".mtx\"\n",
+    "):\n",
+    "    graph = nx.read_edgelist(file_path)\n",
+    "elif network_type == \".gml\":\n",
+    "    graph = nx.read_gml(file_path, comments=\"#\")\n",
+    "\n",
+    "graph.remove_edges_from(nx.selfloop_edges(graph))\n",
+    "nx.set_node_attributes(graph, None, \"SIR\")\n",
+    "nx.set_node_attributes(graph, None, \"embedding\")\n",
+    "\n",
+    "graph.graph[\"id\"] = 0\n",
+    "\n",
+    "print(network_name, '\\n', graph)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 132,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "selected_nodes = []"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "soc-hamsterster(2426 N and 16630 E) \n",
+      "\n",
+      "Selected Nodes Count: 2426\n"
+     ]
+    }
+   ],
+   "source": [
+    "print(network_name, '\\n')\n",
+    "\n",
+    "beta = 0.01\n",
+    "landa = 0.7\n",
+    "epoch = 1000\n",
+    "get_past_results_obj = Get_Past_Results(network_path, network_name)\n",
+    "\n",
+    "sir_resulst_status, nodes_SIR_result = get_past_results_obj.get_past_SIR_results(beta, landa, epoch)\n",
+    "for layer_id, node_id, sir_value in nodes_SIR_result:\n",
+    "    graph.nodes[node_id][\"SIR\"] = sir_value\n",
+    "    selected_nodes.append(node_id)\n",
+    "\n",
+    "print(f\"Selected Nodes Count: {len(selected_nodes)}\")"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 134,
+   "metadata": {},
+   "outputs": [
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "Create Embedding\n"
+     ]
+    },
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "\n"
+     ]
+    },
+    {
+     "name": "stderr",
+     "output_type": "stream",
+     "text": [
+      "100%|██████████| 2426/2426 [01:10<00:00, 34.48it/s]\n"
+     ]
+    }
+   ],
+   "source": [
+    "machine = WaveletMachine(graph, settings_args)\n",
+    "print(\"Create Embedding\\n\")\n",
+    "machine.create_embedding(target_nodes=selected_nodes)\n"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 
